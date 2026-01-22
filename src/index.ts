@@ -57,7 +57,7 @@ function connect(): void {
 
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║       🎧 TENSOR WEBSOCKET LISTENER                         ║');
+  console.log('║       🎧 TENSOR WEBSOCKET LISTENER                          ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
   console.log('📋 Configuration:');
