@@ -1,0 +1,21 @@
+{
+  "name": "tensor-listener",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env dist/index.js",
+    "build": "tsc",
+    "dev": "tsx --env-file=.env src/index.ts",
+    "heroku-postbuild": "npm run build"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.78.0",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5"
+  }
+}
