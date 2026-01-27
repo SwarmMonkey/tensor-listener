@@ -13,11 +13,14 @@
 
 import WebSocket from 'ws';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { sendSaleNotification, sendOfferNotification } from './services/notifications.js';
 
 // --- Configuration ---
 const TENSOR_API_KEY = process.env.TENSOR_API_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
 
 const TENSOR_WS_URL = 'wss://api.mainnet.tensordev.io/ws';
 
@@ -39,6 +42,14 @@ if (!TENSOR_API_KEY) {
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   console.error('❌ SUPABASE_URL and SUPABASE_SERVICE_KEY are required');
   process.exit(1);
+}
+
+// Resend configuration (optional - notifications will be skipped if not set)
+if (!RESEND_API_KEY) {
+  console.warn('⚠️ RESEND_API_KEY not set - email notifications will be disabled');
+}
+if (!RESEND_FROM_EMAIL) {
+  console.warn('⚠️ RESEND_FROM_EMAIL not set - using default: notifications@graded.app');
 }
 
 // --- Initialize Supabase ---
@@ -87,6 +98,8 @@ function connect(): void {
       { event: 'newTransaction', payload: { collId: TENSOR_COLLECTION_IDS.PHYGITALS } },
       { event: 'newTransaction', payload: { slug: 'collector_crypt' } },
       { event: 'newTransaction', payload: { slug: 'phygitals' } },
+      { event: 'tcompBidUpdate', payload: { collId: TENSOR_COLLECTION_IDS.COLLECTOR_CRYPT } },
+      { event: 'tcompBidUpdate', payload: { collId: TENSOR_COLLECTION_IDS.PHYGITALS } },
     ];
 
     console.log('\n📡 Subscribing to collections...\n');
@@ -137,6 +150,11 @@ function connect(): void {
       if (message.type === 'newTransaction' && message.data?.tx) {
         await handleTransaction(message);
       }
+
+      // Handle tcompBidUpdate events (offers)
+      if (message.type === 'tcompBidUpdate' && message.data?.tx) {
+        await handleBidUpdate(message);
+      }
     } catch (err) {
       console.error('⚠️ Failed to parse message:', rawData);
     }
@@ -145,7 +163,7 @@ function connect(): void {
   // Connection closed
   socket.on('close', (code: number, reason: Buffer) => {
     console.log(`🔴 WebSocket closed: ${code} - ${reason.toString()}`);
-    
+
     if (pingInterval) {
       clearInterval(pingInterval);
       pingInterval = null;
@@ -166,9 +184,9 @@ function connect(): void {
 function scheduleReconnect(): void {
   reconnectAttempts++;
   const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY);
-  
+
   console.log(`\n🔄 Reconnecting in ${delay / 1000} seconds (attempt ${reconnectAttempts})...`);
-  
+
   setTimeout(() => {
     connect();
   }, delay);
@@ -302,13 +320,29 @@ async function handleTransaction(message: any): Promise<void> {
         console.log('\n✅ AFTER UPDATE:');
         console.log(JSON.stringify(updated, null, 2));
         console.log(`\n🎉 Successfully updated ${mintAddress.slice(0, 8)}... (${txType})`);
+
+        // Send sale notification for SALE/ACCEPT_BID transactions
+        if ((txType === 'SALE' || txType === 'ACCEPT_BID') && seller && price !== null) {
+          try {
+            await sendSaleNotification(supabase, {
+              sellerWallet: seller,
+              nftName: nftName || 'Unknown NFT',
+              price: price,
+              currency: isUSDC ? 'USDC' : 'SOL',
+              buyerWallet: buyer || 'Unknown',
+            });
+          } catch (err) {
+            // Don't crash if notification fails
+            console.error('⚠️ Failed to send sale notification:', err);
+          }
+        }
       }
     } else {
       console.log(`\n📥 NFT ${mintAddress.slice(0, 8)}... not found in database, creating new entry...`);
 
       // Extract additional data from the message for the new NFT
       const mintData = txWrapper.mint;
-      
+
       // Determine collection slug from collId
       let detectedCollectionSlug = 'unknown';
       const collId = txWrapper.collId || mintData?.collId;
@@ -352,10 +386,107 @@ async function handleTransaction(message: any): Promise<void> {
         console.log('\n✅ SUCCESSFULLY INSERTED:');
         console.log(JSON.stringify(inserted, null, 2));
         console.log(`\n🎉 Created new NFT entry for ${mintAddress.slice(0, 8)}... (${txType})`);
+
+        // Send sale notification for SALE/ACCEPT_BID transactions
+        if ((txType === 'SALE' || txType === 'ACCEPT_BID') && seller && price !== null) {
+          try {
+            await sendSaleNotification(supabase, {
+              sellerWallet: seller,
+              nftName: nftName || 'Unknown NFT',
+              price: price,
+              currency: isUSDC ? 'USDC' : 'SOL',
+              buyerWallet: buyer || 'Unknown',
+            });
+          } catch (err) {
+            // Don't crash if notification fails
+            console.error('⚠️ Failed to send sale notification:', err);
+          }
+        }
       }
     }
   } catch (err) {
     console.error('❌ Error handling transaction:', err);
+  }
+}
+
+// --- Bid Update Handler (Offers) ---
+async function handleBidUpdate(message: any): Promise<void> {
+  try {
+    const { tx: txWrapper } = message.data;
+    const { tx, mint } = txWrapper;
+
+    // Extract bid details
+    const mintAddress = mint?.onchainId;
+    const bidder = tx?.buyer || tx?.bidder;
+    const grossAmount = tx?.grossAmount;
+    const grossAmountUnit = tx?.grossAmountUnit;
+    const nftName = mint?.name;
+
+    console.log('\n📋 PARSED BID UPDATE:');
+    console.log(`   Mint: ${mintAddress}`);
+    console.log(`   NFT Name: ${nftName}`);
+    console.log(`   Bidder: ${bidder}`);
+    console.log(`   Amount: ${grossAmount}`);
+    console.log(`   Currency: ${grossAmountUnit === USDC_MINT ? 'USDC' : 'SOL'}`);
+
+    if (!mintAddress) {
+      console.log('⚠️ No mint address found in bid update, skipping');
+      return;
+    }
+
+    if (!bidder) {
+      console.log('⚠️ No bidder found in bid update, skipping');
+      return;
+    }
+
+    // Calculate price
+    const isUSDC = grossAmountUnit === USDC_MINT;
+    const decimals = isUSDC ? 6 : 9;
+    const price = grossAmount ? parseFloat(grossAmount) / Math.pow(10, decimals) : null;
+
+    if (price === null) {
+      console.log('⚠️ No valid price found in bid update, skipping');
+      return;
+    }
+
+    console.log(`   Price: ${isUSDC ? `$${price.toFixed(2)} USDC` : `◎${price.toFixed(4)} SOL`}`);
+
+    // Find NFT owner from database
+    const { data: nft, error: nftError } = await supabase
+      .from('nfts')
+      .select('owner, name')
+      .eq('mint_address', mintAddress)
+      .single();
+
+    if (nftError) {
+      if (nftError.code === 'PGRST116') {
+        console.log(`⚠️ NFT ${mintAddress.slice(0, 8)}... not found in database, skipping notification`);
+      } else {
+        console.error(`❌ Error fetching NFT: ${nftError.message}`);
+      }
+      return;
+    }
+
+    if (!nft?.owner) {
+      console.log(`⚠️ NFT ${mintAddress.slice(0, 8)}... has no owner, skipping notification`);
+      return;
+    }
+
+    // Send offer notification to NFT owner
+    try {
+      await sendOfferNotification(supabase, {
+        ownerWallet: nft.owner,
+        nftName: nftName || nft.name || 'Unknown NFT',
+        price: price,
+        currency: isUSDC ? 'USDC' : 'SOL',
+        bidderWallet: bidder,
+      });
+    } catch (err) {
+      // Don't crash if notification fails
+      console.error('⚠️ Failed to send offer notification:', err);
+    }
+  } catch (err) {
+    console.error('❌ Error handling bid update:', err);
   }
 }
 
