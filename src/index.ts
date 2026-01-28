@@ -39,6 +39,12 @@ const TENSOR_COLLECTION_IDS = {
   PHYGITALS: '6f582e94-e4ed-41ab-9285-4bf456b0768a',
 };
 
+// Map Tensor slugs to database slugs
+const TENSOR_TO_DB_SLUG: Record<string, string> = {
+  'collector_crypt': 'collector-crypt',
+  'phygitals': 'phygitals',
+};
+
 // --- Validation ---
 if (!TENSOR_API_KEY) {
   console.error('❌ TENSOR_API_KEY is required');
@@ -60,6 +66,76 @@ if (!RESEND_FROM_EMAIL) {
 // --- Initialize Supabase ---
 const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
 
+// --- Sale Recording Types ---
+// Records sales with source attribution
+// If the sale was already recorded by on-site purchase (via /api/listings/purchase),
+// this will be ignored due to the unique constraint on transaction_signature
+interface SaleRecord {
+  mintAddress: string;
+  transactionSignature?: string;
+  sellerWallet?: string;
+  buyerWallet?: string;
+  priceNative?: number | null;
+  currencyAddress?: string;
+  collectionSlug?: string;
+  nftName?: string;
+  marketplace?: string;
+}
+
+// --- Sale Recording Function ---
+async function recordSale(sale: SaleRecord): Promise<void> {
+  if (!sale.transactionSignature) {
+    console.log('⚠️ No transaction signature - cannot record sale');
+    return;
+  }
+
+  try {
+    // First, check if this sale was already recorded (e.g., by on-site purchase)
+    const { data: existing } = await supabase
+      .from('sales')
+      .select('id, sale_source')
+      .eq('transaction_signature', sale.transactionSignature)
+      .single();
+
+    if (existing) {
+      console.log(`ℹ️ Sale already recorded with source='${existing.sale_source}' - skipping`);
+      return;
+    }
+
+    // Record as external sale (not from our site)
+    const saleRecord = {
+      mint_address: sale.mintAddress,
+      transaction_signature: sale.transactionSignature,
+      seller_wallet: sale.sellerWallet || null,
+      buyer_wallet: sale.buyerWallet || null,
+      price_native: sale.priceNative || null,
+      currency_address: sale.currencyAddress || SOL_MINT,
+      collection_slug: sale.collectionSlug || null,
+      nft_name: sale.nftName || null,
+      sale_source: sale.marketplace || 'tensor',  // External sale source
+      marketplace: sale.marketplace || 'tensor',
+      sold_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('sales')
+      .insert(saleRecord);
+
+    if (error) {
+      // Unique constraint violation means it was already recorded - that's fine
+      if (error.code === '23505') {
+        console.log(`ℹ️ Sale already exists (duplicate) - skipping`);
+      } else {
+        console.error(`❌ Failed to record sale: ${error.message}`);
+      }
+    } else {
+      console.log(`📊 Recorded EXTERNAL sale: source='${sale.marketplace}' for ${sale.mintAddress.slice(0, 8)}...`);
+    }
+  } catch (err) {
+    console.error('❌ Error recording sale:', err);
+  }
+}
+
 // --- Reconnection State ---
 let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000; // 30 seconds max
@@ -73,7 +149,7 @@ function connect(): void {
 
   console.log('');
   console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║       🎧 TENSOR WEBSOCKET LISTENER                         ║');
+  console.log('║       🎧 TENSOR WEBSOCKET LISTENER                          ║');
   console.log('╚════════════════════════════════════════════════════════════╝');
   console.log('');
   console.log('📋 Configuration:');
@@ -286,6 +362,19 @@ async function handleTransaction(message: any): Promise<void> {
           marketplace: null,
           listed_at: null,
         };
+        
+        // Record sale for tracking (will be ignored if already recorded by on-site purchase)
+        await recordSale({
+          mintAddress,
+          transactionSignature: txId,
+          sellerWallet: seller,
+          buyerWallet: buyer,
+          priceNative: price,
+          currencyAddress: isUSDC ? USDC_MINT : SOL_MINT,
+          collectionSlug: TENSOR_TO_DB_SLUG[collectionSlug] || collectionSlug,
+          nftName,
+          marketplace: 'tensor',
+        });
         break;
 
       default:
