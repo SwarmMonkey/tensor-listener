@@ -9,6 +9,8 @@ import { Resend } from 'resend';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { generateSaleEmail, type SaleEmailData } from '../templates/sale-email.js';
 import { generateOfferEmail, type OfferEmailData } from '../templates/offer-email.js';
+import { generateListEmail, type ListEmailData } from '../templates/list-email.js';
+import { generateDelistEmail, type DelistEmailData } from '../templates/delist-email.js';
 
 // --- Configuration ---
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -40,6 +42,20 @@ export interface OfferNotificationData {
   price: number;
   currency: 'SOL' | 'USDC';
   bidderWallet: string;
+}
+
+export interface ListNotificationData {
+  sellerWallet: string;
+  nftName: string;
+  price: number;
+  currency: 'SOL' | 'USDC';
+  imageUrl?: string | null;
+}
+
+export interface DelistNotificationData {
+  ownerWallet: string;
+  nftName: string;
+  imageUrl?: string | null;
 }
 
 // --- Helper Functions ---
@@ -197,5 +213,108 @@ export async function sendOfferNotification(
   } catch (err) {
     // Don't crash the service if email fails
     console.error(`❌ Error sending offer notification:`, err);
+  }
+}
+
+// --- List Notification ---
+/**
+ * Sends email notification when a user's NFT is listed.
+ */
+export async function sendListNotification(
+  supabase: SupabaseClient,
+  data: ListNotificationData
+): Promise<void> {
+  if (!resend) {
+    console.log('⏭️ Skipping list notification - Resend not configured');
+    return;
+  }
+
+  try {
+    const profile = await getUserProfile(supabase, data.sellerWallet);
+
+    if (!profile) {
+      console.log(
+        `⏭️ Skipping list notification - no email found for seller ${truncateWallet(data.sellerWallet)}`
+      );
+      return;
+    }
+
+    const emailData: ListEmailData = {
+      nftName: data.nftName,
+      price: data.price,
+      currency: data.currency,
+      imageUrl: data.imageUrl ?? null,
+      displayName: profile.display_name,
+    };
+
+    const html = generateListEmail(emailData);
+
+    const priceStr =
+      data.currency === 'SOL' ? `◎${data.price.toFixed(4)} SOL` : `$${data.price.toFixed(2)} USDC`;
+
+    const { data: emailResult, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: [profile.email],
+      subject: `📌 Your card "${data.nftName}" is now listed for ${priceStr}`,
+      html,
+    });
+
+    if (error) {
+      console.error(`❌ Failed to send list notification to ${profile.email}:`, error);
+      return;
+    }
+
+    console.log(`✅ List notification sent to ${profile.email} (${emailResult?.id || 'unknown'})`);
+  } catch (err) {
+    console.error('❌ Error sending list notification:', err);
+  }
+}
+
+// --- Delist Notification ---
+/**
+ * Sends email notification when a user's NFT is delisted.
+ */
+export async function sendDelistNotification(
+  supabase: SupabaseClient,
+  data: DelistNotificationData
+): Promise<void> {
+  if (!resend) {
+    console.log('⏭️ Skipping delist notification - Resend not configured');
+    return;
+  }
+
+  try {
+    const profile = await getUserProfile(supabase, data.ownerWallet);
+
+    if (!profile) {
+      console.log(
+        `⏭️ Skipping delist notification - no email found for owner ${truncateWallet(data.ownerWallet)}`
+      );
+      return;
+    }
+
+    const emailData: DelistEmailData = {
+      nftName: data.nftName,
+      imageUrl: data.imageUrl ?? null,
+      displayName: profile.display_name,
+    };
+
+    const html = generateDelistEmail(emailData);
+
+    const { data: emailResult, error } = await resend.emails.send({
+      from: FROM_EMAIL,
+      to: [profile.email],
+      subject: `🧾 Your card "${data.nftName}" has been delisted`,
+      html,
+    });
+
+    if (error) {
+      console.error(`❌ Failed to send delist notification to ${profile.email}:`, error);
+      return;
+    }
+
+    console.log(`✅ Delist notification sent to ${profile.email} (${emailResult?.id || 'unknown'})`);
+  } catch (err) {
+    console.error('❌ Error sending delist notification:', err);
   }
 }

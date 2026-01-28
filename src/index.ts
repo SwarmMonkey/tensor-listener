@@ -13,7 +13,12 @@
 
 import WebSocket from 'ws';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { sendSaleNotification, sendOfferNotification } from './services/notifications.js';
+import {
+  sendSaleNotification,
+  sendOfferNotification,
+  sendListNotification,
+  sendDelistNotification,
+} from './services/notifications.js';
 
 // --- Configuration ---
 const TENSOR_API_KEY = process.env.TENSOR_API_KEY;
@@ -202,12 +207,13 @@ async function handleTransaction(message: any): Promise<void> {
     const txType = tx?.txType;
     const txId = tx?.txId;
     const mintAddress = mint?.onchainId;
-    const seller = tx?.seller;
-    const buyer = tx?.buyer;
+    const seller = tx?.sellerId || tx?.seller;
+    const buyer = tx?.buyerId || tx?.buyer;
     const grossAmount = tx?.grossAmount;
     const grossAmountUnit = tx?.grossAmountUnit;
     const collectionSlug = mint?.slug;
     const nftName = mint?.name;
+    const imageUrl = mint?.imageUri;
 
     console.log('\n📋 PARSED TRANSACTION:');
     console.log(`   Type: ${txType}`);
@@ -321,6 +327,37 @@ async function handleTransaction(message: any): Promise<void> {
         console.log(JSON.stringify(updated, null, 2));
         console.log(`\n🎉 Successfully updated ${mintAddress.slice(0, 8)}... (${txType})`);
 
+        // Send list notification for LIST/EDIT_SINGLE_LISTING
+        if ((txType === 'LIST' || txType === 'EDIT_SINGLE_LISTING') && seller && price !== null) {
+          try {
+            await sendListNotification(supabase, {
+              sellerWallet: seller,
+              nftName: nftName || existing.name || 'Unknown NFT',
+              price,
+              currency: isUSDC ? 'USDC' : 'SOL',
+              imageUrl: imageUrl || null,
+            });
+          } catch (err) {
+            console.error('⚠️ Failed to send list notification:', err);
+          }
+        }
+
+        // Send delist notification for DELIST (use current owner)
+        if (txType === 'DELIST') {
+          const ownerWallet = existing.owner || seller;
+          if (ownerWallet) {
+            try {
+              await sendDelistNotification(supabase, {
+                ownerWallet,
+                nftName: nftName || existing.name || 'Unknown NFT',
+                imageUrl: imageUrl || null,
+              });
+            } catch (err) {
+              console.error('⚠️ Failed to send delist notification:', err);
+            }
+          }
+        }
+
         // Send sale notification for SALE/ACCEPT_BID transactions
         if ((txType === 'SALE' || txType === 'ACCEPT_BID') && seller && price !== null) {
           try {
@@ -386,6 +423,21 @@ async function handleTransaction(message: any): Promise<void> {
         console.log('\n✅ SUCCESSFULLY INSERTED:');
         console.log(JSON.stringify(inserted, null, 2));
         console.log(`\n🎉 Created new NFT entry for ${mintAddress.slice(0, 8)}... (${txType})`);
+
+        // Send list notification for LIST/EDIT_SINGLE_LISTING on insert
+        if ((txType === 'LIST' || txType === 'EDIT_SINGLE_LISTING') && seller && price !== null) {
+          try {
+            await sendListNotification(supabase, {
+              sellerWallet: seller,
+              nftName: nftName || inserted.name || 'Unknown NFT',
+              price,
+              currency: isUSDC ? 'USDC' : 'SOL',
+              imageUrl: imageUrl || inserted.image || null,
+            });
+          } catch (err) {
+            console.error('⚠️ Failed to send list notification:', err);
+          }
+        }
 
         // Send sale notification for SALE/ACCEPT_BID transactions
         if ((txType === 'SALE' || txType === 'ACCEPT_BID') && seller && price !== null) {
