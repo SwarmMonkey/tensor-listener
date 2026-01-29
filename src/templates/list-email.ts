@@ -23,11 +23,11 @@ export function generateListEmail(data: ListEmailData): string {
 
   const imageSection = imageUrl
     ? `
-      <div style="margin: 24px 0; text-align: center;">
+      <div style="margin: 20px auto; text-align: center; max-width: 300px;">
         <img
           src="${escapeAttribute(imageUrl)}"
           alt="${safeName}"
-          style="width: 100%; max-width: 520px; border-radius: 10px; border: 1px solid #333333; display: block;"
+          style="width: 100%; max-width: 300px; height: auto; border-radius: 8px; border: 1px solid #333333; display: block; margin: 0 auto;"
         />
       </div>
     `.trim()
@@ -49,40 +49,41 @@ export function generateListEmail(data: ListEmailData): string {
           <!-- Header -->
           <tr>
             <td style="padding: 40px 40px 30px; text-align: center; background: linear-gradient(135deg, #1a1a1a 0%, #2a2a2a 100%);">
+              <img src="https://www.graded.world/Graded_logo_horizontal.png" alt="Graded" style="max-width: 200px; height: auto; margin: 0 0 20px 0; display: block; margin-left: auto; margin-right: auto;" />
               <h1 style="margin: 0; font-size: 28px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;">
-                📌 Your Card Is Now Listed!
+                Your Card Is Now Listed!
               </h1>
             </td>
           </tr>
 
           <!-- Content -->
           <tr>
-            <td style="padding: 40px;">
-              <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.6; color: #d4d4d4;">
+            <td style="padding: 32px 40px;">
+              <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6; color: #d4d4d4;">
                 Hi ${escapeHtml(greeting)},
               </p>
 
-              <p style="margin: 0 0 24px; font-size: 16px; line-height: 1.6; color: #d4d4d4;">
+              <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6; color: #d4d4d4;">
                 Your card is now listed:
               </p>
 
+              ${imageSection}
+
               <!-- NFT Details Card -->
-              <div style="background-color: #252525; border-radius: 8px; padding: 24px; margin: 24px 0; border: 1px solid #333333;">
-                <p style="margin: 0 0 12px; font-size: 18px; font-weight: 600; color: #ffffff;">
+              <div style="background-color: #252525; border-radius: 8px; padding: 20px; margin: 20px 0; border: 1px solid #333333;">
+                <p style="margin: 0 0 10px; font-size: 18px; font-weight: 600; color: #ffffff;">
                   ${safeName}
                 </p>
                 <p style="margin: 0; font-size: 14px; color: #a3a3a3;">
-                  Listing price: <span style="color: #60a5fa; font-weight: 600; font-size: 20px;">${priceDisplay}</span>
+                  Listing price: <span style="color: #60a5fa; font-weight: 600; font-size: 18px;">${priceDisplay}</span>
                 </p>
               </div>
 
-              ${imageSection}
-
               <!-- CTA Button -->
-              <table role="presentation" style="width: 100%; border-collapse: collapse; margin: 32px 0;">
+              <table role="presentation" style="width: 100%; border-collapse: collapse; margin: 24px 0 0 0;">
                 <tr>
                   <td align="center" style="padding: 0;">
-                    <a href="https://graded.app" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
+                    <a href="https://graded.app" style="display: inline-block; padding: 12px 28px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
                       View Listing on Graded
                     </a>
                   </td>
