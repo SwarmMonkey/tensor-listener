@@ -291,8 +291,11 @@ async function handleTransaction(message: any): Promise<void> {
     const nftName = mint?.name;
     const imageUrl = mint?.imageUri;
 
+    // Normalize txType for case-insensitive matching
+    const txTypeNormalized = txType?.toUpperCase();
+
     console.log('\n📋 PARSED TRANSACTION:');
-    console.log(`   Type: ${txType}`);
+    console.log(`   Type: ${txType} (normalized: ${txTypeNormalized})`);
     console.log(`   TX ID: ${txId}`);
     console.log(`   Mint: ${mintAddress}`);
     console.log(`   NFT Name: ${nftName}`);
@@ -300,15 +303,15 @@ async function handleTransaction(message: any): Promise<void> {
     console.log(`   Seller: ${seller}`);
     console.log(`   Buyer: ${buyer}`);
     console.log(`   Amount: ${grossAmount}`);
-    console.log(`   Currency: ${grossAmountUnit === USDC_MINT ? 'USDC' : 'SOL'}`);
+    console.log(`   Currency Unit (raw): ${grossAmountUnit}`);
 
     if (!mintAddress) {
       console.log('⚠️ No mint address found, skipping');
       return;
     }
 
-    // Calculate price
-    const isUSDC = grossAmountUnit === USDC_MINT;
+    // Calculate price - handle both mint addresses and string values like "SOL_LAMPORT"
+    const isUSDC = grossAmountUnit === USDC_MINT || grossAmountUnit === 'USDC';
     const decimals = isUSDC ? 6 : 9;
     const price = grossAmount ? parseFloat(grossAmount) / Math.pow(10, decimals) : null;
 
@@ -320,7 +323,8 @@ async function handleTransaction(message: any): Promise<void> {
       updated_at: now,
     };
 
-    switch (txType) {
+    // Use normalized txType for case-insensitive matching
+    switch (txTypeNormalized) {
       case 'LIST':
       case 'EDIT_SINGLE_LISTING':
         updatePayload = {
@@ -351,6 +355,10 @@ async function handleTransaction(message: any): Promise<void> {
 
       case 'SALE':
       case 'ACCEPT_BID':
+      case 'BUY':        // Alternative sale type
+      case 'PURCHASE':   // Alternative sale type
+      case 'SWAP':       // Alternative sale type
+        console.log(`🛒 SALE DETECTED! txType: ${txType}`);
         updatePayload = {
           ...updatePayload,
           is_listed: false,
@@ -378,7 +386,8 @@ async function handleTransaction(message: any): Promise<void> {
         break;
 
       default:
-        console.log(`⏭️ Unhandled transaction type: ${txType}`);
+        console.log(`⏭️ Unhandled transaction type: "${txType}" (normalized: "${txTypeNormalized}")`);
+        console.log(`   Full tx data:`, JSON.stringify(tx, null, 2));
         return;
     }
 
