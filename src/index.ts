@@ -147,18 +147,7 @@ let isShuttingDown = false;
 function connect(): void {
   if (isShuttingDown) return;
 
-  console.log('');
-  console.log('╔════════════════════════════════════════════════════════════╗');
-  console.log('║       🎧 TENSOR WEBSOCKET LISTENER                          ║');
-  console.log('╚════════════════════════════════════════════════════════════╝');
-  console.log('');
-  console.log('📋 Configuration:');
-  console.log(`   Tensor API Key: ✅ Set`);
-  console.log(`   Supabase URL: ✅ Set`);
-  console.log(`   Reconnect Attempts: ${reconnectAttempts}`);
-  console.log('');
-
-  console.log('🔌 Connecting to Tensor WebSocket...');
+  console.log(`🔌 Connecting to Tensor WebSocket...${reconnectAttempts > 0 ? ` (attempt ${reconnectAttempts})` : ''}`);
 
   const socket = new WebSocket(TENSOR_WS_URL, {
     headers: {
@@ -183,14 +172,11 @@ function connect(): void {
       { event: 'tcompBidUpdate', payload: { collId: TENSOR_COLLECTION_IDS.PHYGITALS } },
     ];
 
-    console.log('\n📡 Subscribing to collections...\n');
-
     for (const msg of subscriptions) {
-      console.log(`   Sending: ${JSON.stringify(msg)}`);
       socket.send(JSON.stringify(msg));
     }
 
-    console.log('\n⏳ Waiting for events...\n');
+    console.log(`📡 Subscribed to ${subscriptions.length} channels, waiting for events...`);
 
     // Start ping interval to keep connection alive
     if (pingInterval) clearInterval(pingInterval);
@@ -209,17 +195,11 @@ function connect(): void {
     try {
       const message = JSON.parse(rawData);
 
-      // Log pong responses briefly
+      // Log pong responses to show connection is alive
       if (message.type === 'pong') {
-        console.log('🏓 pong received (connection alive)');
+        console.log('🏓 pong');
         return;
       }
-
-      // Log every message
-      console.log('\n' + '='.repeat(70));
-      console.log('📨 INCOMING MESSAGE:');
-      console.log(JSON.stringify(message, null, 2));
-      console.log('='.repeat(70));
 
       // Check for errors
       if (message.status === 'error' || message.error) {
@@ -294,17 +274,6 @@ async function handleTransaction(message: any): Promise<void> {
     // Normalize txType for case-insensitive matching
     const txTypeNormalized = txType?.toUpperCase();
 
-    console.log('\n📋 PARSED TRANSACTION:');
-    console.log(`   Type: ${txType} (normalized: ${txTypeNormalized})`);
-    console.log(`   TX ID: ${txId}`);
-    console.log(`   Mint: ${mintAddress}`);
-    console.log(`   NFT Name: ${nftName}`);
-    console.log(`   Collection: ${collectionSlug}`);
-    console.log(`   Seller: ${seller}`);
-    console.log(`   Buyer: ${buyer}`);
-    console.log(`   Amount: ${grossAmount}`);
-    console.log(`   Currency Unit (raw): ${grossAmountUnit}`);
-
     if (!mintAddress) {
       console.log('⚠️ No mint address found, skipping');
       return;
@@ -314,8 +283,6 @@ async function handleTransaction(message: any): Promise<void> {
     const isUSDC = grossAmountUnit === USDC_MINT || grossAmountUnit === 'USDC';
     const decimals = isUSDC ? 6 : 9;
     const price = grossAmount ? parseFloat(grossAmount) / Math.pow(10, decimals) : null;
-
-    console.log(`   Price: ${price !== null ? (isUSDC ? `$${price.toFixed(2)} USDC` : `◎${price.toFixed(4)} SOL`) : 'N/A'}`);
 
     // Build update payload based on transaction type
     const now = new Date().toISOString();
@@ -355,10 +322,9 @@ async function handleTransaction(message: any): Promise<void> {
 
       case 'SALE':
       case 'ACCEPT_BID':
-      case 'BUY':        // Alternative sale type
-      case 'PURCHASE':   // Alternative sale type
-      case 'SWAP':       // Alternative sale type
-        console.log(`🛒 SALE DETECTED! txType: ${txType}`);
+      case 'BUY':
+      case 'PURCHASE':
+      case 'SWAP':
         updatePayload = {
           ...updatePayload,
           is_listed: false,
@@ -386,13 +352,9 @@ async function handleTransaction(message: any): Promise<void> {
         break;
 
       default:
-        console.log(`⏭️ Unhandled transaction type: "${txType}" (normalized: "${txTypeNormalized}")`);
-        console.log(`   Full tx data:`, JSON.stringify(tx, null, 2));
+        console.log(`⏭️ Unknown txType: ${txType}`);
         return;
     }
-
-    console.log('\n📝 UPDATE PAYLOAD:');
-    console.log(JSON.stringify(updatePayload, null, 2));
 
     // Check if NFT exists in database
     const { data: existing, error: selectError } = await supabase
@@ -407,23 +369,17 @@ async function handleTransaction(message: any): Promise<void> {
     }
 
     if (existing) {
-      console.log('\n📊 BEFORE UPDATE:');
-      console.log(JSON.stringify(existing, null, 2));
-
       // Update the NFT
-      const { data: updated, error: updateError } = await supabase
+      const { error: updateError } = await supabase
         .from('nfts')
         .update(updatePayload)
-        .eq('mint_address', mintAddress)
-        .select()
-        .single();
+        .eq('mint_address', mintAddress);
 
       if (updateError) {
-        console.error(`❌ Failed to update: ${updateError.message}`);
+        console.error(`❌ Update failed: ${updateError.message}`);
       } else {
-        console.log('\n✅ AFTER UPDATE:');
-        console.log(JSON.stringify(updated, null, 2));
-        console.log(`\n🎉 Successfully updated ${mintAddress.slice(0, 8)}... (${txType})`);
+        const priceStr = price !== null ? (isUSDC ? `$${price.toFixed(2)}` : `◎${price.toFixed(2)}`) : '';
+        console.log(`✅ ${txType}: ${nftName || mintAddress.slice(0, 8)}${priceStr ? ` @ ${priceStr}` : ''}`);
 
         // Send list notification for LIST/EDIT_SINGLE_LISTING
         if ((txType === 'LIST' || txType === 'EDIT_SINGLE_LISTING') && seller && price !== null) {
@@ -473,8 +429,6 @@ async function handleTransaction(message: any): Promise<void> {
         }
       }
     } else {
-      console.log(`\n📥 NFT ${mintAddress.slice(0, 8)}... not found in database, creating new entry...`);
-
       // Extract additional data from the message for the new NFT
       const mintData = txWrapper.mint;
 
@@ -506,9 +460,6 @@ async function handleTransaction(message: any): Promise<void> {
         updated_at: now,
       };
 
-      console.log('\n📝 INSERT PAYLOAD:');
-      console.log(JSON.stringify(insertPayload, null, 2));
-
       const { data: inserted, error: insertError } = await supabase
         .from('nfts')
         .insert(insertPayload)
@@ -516,11 +467,10 @@ async function handleTransaction(message: any): Promise<void> {
         .single();
 
       if (insertError) {
-        console.error(`❌ Failed to insert: ${insertError.message}`);
+        console.error(`❌ Insert failed: ${insertError.message}`);
       } else {
-        console.log('\n✅ SUCCESSFULLY INSERTED:');
-        console.log(JSON.stringify(inserted, null, 2));
-        console.log(`\n🎉 Created new NFT entry for ${mintAddress.slice(0, 8)}... (${txType})`);
+        const priceStr = price !== null ? (isUSDC ? `$${price.toFixed(2)}` : `◎${price.toFixed(2)}`) : '';
+        console.log(`✅ ${txType} (new): ${nftName || mintAddress.slice(0, 8)}${priceStr ? ` @ ${priceStr}` : ''}`);
 
         // Send list notification for LIST/EDIT_SINGLE_LISTING on insert
         if ((txType === 'LIST' || txType === 'EDIT_SINGLE_LISTING') && seller && price !== null) {
@@ -572,13 +522,6 @@ async function handleBidUpdate(message: any): Promise<void> {
     const grossAmountUnit = tx?.grossAmountUnit;
     const nftName = mint?.name;
 
-    console.log('\n📋 PARSED BID UPDATE:');
-    console.log(`   Mint: ${mintAddress}`);
-    console.log(`   NFT Name: ${nftName}`);
-    console.log(`   Bidder: ${bidder}`);
-    console.log(`   Amount: ${grossAmount}`);
-    console.log(`   Currency: ${grossAmountUnit === USDC_MINT ? 'USDC' : 'SOL'}`);
-
     if (!mintAddress) {
       console.log('⚠️ No mint address found in bid update, skipping');
       return;
@@ -595,11 +538,8 @@ async function handleBidUpdate(message: any): Promise<void> {
     const price = grossAmount ? parseFloat(grossAmount) / Math.pow(10, decimals) : null;
 
     if (price === null) {
-      console.log('⚠️ No valid price found in bid update, skipping');
       return;
     }
-
-    console.log(`   Price: ${isUSDC ? `$${price.toFixed(2)} USDC` : `◎${price.toFixed(4)} SOL`}`);
 
     // Find NFT owner from database
     const { data: nft, error: nftError } = await supabase
@@ -608,17 +548,7 @@ async function handleBidUpdate(message: any): Promise<void> {
       .eq('mint_address', mintAddress)
       .single();
 
-    if (nftError) {
-      if (nftError.code === 'PGRST116') {
-        console.log(`⚠️ NFT ${mintAddress.slice(0, 8)}... not found in database, skipping notification`);
-      } else {
-        console.error(`❌ Error fetching NFT: ${nftError.message}`);
-      }
-      return;
-    }
-
-    if (!nft?.owner) {
-      console.log(`⚠️ NFT ${mintAddress.slice(0, 8)}... has no owner, skipping notification`);
+    if (nftError || !nft?.owner) {
       return;
     }
 
@@ -631,9 +561,9 @@ async function handleBidUpdate(message: any): Promise<void> {
         currency: isUSDC ? 'USDC' : 'SOL',
         bidderWallet: bidder,
       });
+      console.log(`📩 OFFER: ${nftName || mintAddress.slice(0, 8)} @ ${isUSDC ? `$${price.toFixed(2)}` : `◎${price.toFixed(2)}`}`);
     } catch (err) {
-      // Don't crash if notification fails
-      console.error('⚠️ Failed to send offer notification:', err);
+      console.error('❌ Offer notification failed:', err);
     }
   } catch (err) {
     console.error('❌ Error handling bid update:', err);
