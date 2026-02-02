@@ -19,6 +19,11 @@ import {
   sendListNotification,
   sendDelistNotification,
 } from './services/notifications.js';
+import {
+  initializeDiscord,
+  sendHighValueListingAlert,
+  shutdownDiscord,
+} from './services/discord-bot.js';
 
 // --- Configuration ---
 const TENSOR_API_KEY = process.env.TENSOR_API_KEY;
@@ -26,6 +31,8 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM_EMAIL = process.env.RESEND_FROM_EMAIL;
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
+const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
 const TENSOR_WS_URL = 'wss://api.mainnet.tensordev.io/ws';
 
@@ -63,8 +70,16 @@ if (!RESEND_FROM_EMAIL) {
   console.warn('⚠️ RESEND_FROM_EMAIL not set - using default: notifications@graded.app');
 }
 
+// Discord configuration (optional - high-value alerts will be skipped if not set)
+if (!DISCORD_BOT_TOKEN || !DISCORD_CHANNEL_ID) {
+  console.warn('⚠️ DISCORD_BOT_TOKEN or DISCORD_CHANNEL_ID not set - Discord notifications will be disabled');
+}
+
 // --- Initialize Supabase ---
 const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+// --- Initialize Discord ---
+initializeDiscord();
 
 // --- Sale Recording Types ---
 // Records sales with source attribution
@@ -359,7 +374,7 @@ async function handleTransaction(message: any): Promise<void> {
     // Check if NFT exists in database
     const { data: existing, error: selectError } = await supabase
       .from('nfts')
-      .select('mint_address, collection_slug, name, is_listed, price_sol, price_native, owner')
+      .select('mint_address, collection_slug, name, image, is_listed, price_sol, price_native, owner')
       .eq('mint_address', mintAddress)
       .single();
 
@@ -393,6 +408,21 @@ async function handleTransaction(message: any): Promise<void> {
             });
           } catch (err) {
             console.error('⚠️ Failed to send list notification:', err);
+          }
+
+          // Send Discord alert for high-value listings
+          try {
+            await sendHighValueListingAlert({
+              nftName: nftName || existing.name || 'Unknown NFT',
+              price,
+              currency: isUSDC ? 'USDC' : 'SOL',
+              collectionSlug: existing.collection_slug || TENSOR_TO_DB_SLUG[collectionSlug] || collectionSlug,
+              sellerWallet: seller,
+              imageUrl: imageUrl || existing.image || null,
+              mintAddress,
+            });
+          } catch (err) {
+            console.error('⚠️ Failed to send Discord alert:', err);
           }
         }
 
@@ -484,6 +514,21 @@ async function handleTransaction(message: any): Promise<void> {
             });
           } catch (err) {
             console.error('⚠️ Failed to send list notification:', err);
+          }
+
+          // Send Discord alert for high-value listings
+          try {
+            await sendHighValueListingAlert({
+              nftName: nftName || inserted.name || 'Unknown NFT',
+              price,
+              currency: isUSDC ? 'USDC' : 'SOL',
+              collectionSlug: inserted.collection_slug || detectedCollectionSlug,
+              sellerWallet: seller,
+              imageUrl: imageUrl || inserted.image || null,
+              mintAddress,
+            });
+          } catch (err) {
+            console.error('⚠️ Failed to send Discord alert:', err);
           }
         }
 
@@ -582,6 +627,9 @@ function shutdown(signal: string): void {
   if (currentSocket && currentSocket.readyState === WebSocket.OPEN) {
     currentSocket.close();
   }
+
+  // Cleanup Discord bot
+  shutdownDiscord();
 
   // Give time for cleanup
   setTimeout(() => {
