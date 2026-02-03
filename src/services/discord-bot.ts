@@ -184,8 +184,28 @@ export async function sendHighValueListingAlert(data: HighValueListingData): Pro
       {
         name: '💰 Price',
         value: data.currency === 'USDC'
-          ? `$${data.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
-          : `◎${data.price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`,
+          ? `$${data.price.toFixed(2)} USDC`
+          : `◎${data.price.toFixed(4)} SOL`,
+        inline: true,
+      },
+      {
+        name: '💵 USDC Value',
+        value: `~$${usdcValue.toFixed(2)}`,
+        inline: true,
+      },
+    ];
+
+    // Add collection field - always show "Graded"
+    fields.push({
+      name: '📦 Collection',
+      value: 'Graded',
+      inline: true,
+    });
+
+    fields.push(
+      {
+        name: '🏪 Marketplace',
+        value: 'Tensor',
         inline: true,
       },
       {
@@ -197,8 +217,8 @@ export async function sendHighValueListingAlert(data: HighValueListingData): Pro
         name: '🔗 Mint Address',
         value: data.mintAddress ? `\`${truncateWallet(data.mintAddress)}\`` : 'Unknown',
         inline: true,
-      },
-    ];
+      }
+    );
 
     // Build the NFT URL
     const nftUrl = data.collectionSlug && data.mintAddress
@@ -209,13 +229,13 @@ export async function sendHighValueListingAlert(data: HighValueListingData): Pro
     const embed = new EmbedBuilder()
       .setTitle('🔥 High-Value Listing Alert')
       .setDescription(
-        `**${data.nftName || 'Unknown NFT'}** has been listed on Graded!` +
+        `**${data.nftName || 'Unknown NFT'}** has been listed on Tensor!` +
         (nftUrl ? `\n\n**[View on Graded](${nftUrl})**` : '')
       )
       .setColor(0xFFA500) // Orange color
       .addFields(fields)
       .setTimestamp()
-      .setFooter({ text: 'Graded' });
+      .setFooter({ text: 'Graded • Tensor Listener' });
 
     // Add large image if available
     if (data.imageUrl && data.imageUrl.trim() && data.imageUrl.startsWith('http')) {
