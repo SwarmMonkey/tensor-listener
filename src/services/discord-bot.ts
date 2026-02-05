@@ -10,6 +10,7 @@ import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilde
 // --- Configuration ---
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 const DISCORD_CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
+const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY;
 const HIGH_VALUE_THRESHOLD_USDC = 600;
 
 // SOL mint address for price lookup
@@ -21,7 +22,7 @@ let lastPriceFetch: number = 0;
 const PRICE_CACHE_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Fetch current SOL price in USDC from Jupiter Price API
+ * Fetch current SOL price in USDC from Birdeye Price API
  */
 async function fetchSolPrice(): Promise<number> {
   const now = Date.now();
@@ -32,24 +33,33 @@ async function fetchSolPrice(): Promise<number> {
   }
 
   try {
-    const response = await fetch(`https://api.jup.ag/price/v2?ids=${SOL_MINT}`);
+    const response = await fetch(
+      `https://public-api.birdeye.so/defi/price?address=${SOL_MINT}`,
+      {
+        headers: {
+          'X-API-KEY': BIRDEYE_API_KEY || '',
+          'x-chain': 'solana',
+        },
+      }
+    );
+
     if (!response.ok) {
-      throw new Error(`Jupiter API error: ${response.status}`);
+      throw new Error(`Birdeye API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const price = data?.data?.[SOL_MINT]?.price;
+    const price = data?.data?.value;
 
     if (typeof price === 'number' && price > 0) {
       cachedSolPrice = price;
       lastPriceFetch = now;
-      console.log(`💰 Updated SOL price: $${price.toFixed(2)}`);
+      console.log(`💰 Updated SOL price: $${price.toFixed(2)} (Birdeye)`);
       return price;
     }
 
-    throw new Error('Invalid price data from Jupiter');
+    throw new Error('Invalid price data from Birdeye');
   } catch (error) {
-    console.error('⚠️ Failed to fetch SOL price:', error);
+    console.error('⚠️ Failed to fetch SOL price from Birdeye:', error);
     // Fall back to cached price or default
     return cachedSolPrice ?? 150; // Conservative fallback
   }
@@ -67,6 +77,10 @@ export async function initializeDiscord(): Promise<void> {
     console.log('⏭️  Discord bot not configured - high-value listing alerts will be disabled');
     console.log('   Required: DISCORD_BOT_TOKEN and DISCORD_CHANNEL_ID');
     return;
+  }
+
+  if (!BIRDEYE_API_KEY) {
+    console.warn('⚠️  BIRDEYE_API_KEY not set - SOL price conversion may fail, using fallback price');
   }
 
   try {
